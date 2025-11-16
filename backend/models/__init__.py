@@ -14,6 +14,7 @@ from .document import Document
 from .header_anchor import HeaderAnchor
 from .header_outline import HeaderOutlineCache, HeaderOutlineRun
 from .section import DocumentSection
+from .sow import SOWRun, SOWStep
 
 __all__ = [
     "Document",
@@ -29,4 +30,6 @@ __all__ = [
     "HeaderOutlineCache",
     "HeaderOutlineRun",
     "PromptResponse",
+    "SOWRun",
+    "SOWStep",
 ]

@@ -26,6 +26,7 @@ from .routers import (
     observability,
     parse,
     search,
+    sow,
 )
 
 settings = get_settings()
@@ -125,6 +126,7 @@ ROUTERS: Iterable = (
     parse.router,
     search.router,
     observability.router,
+    sow.router,
 )
 
 for router in ROUTERS:

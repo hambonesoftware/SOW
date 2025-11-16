@@ -46,3 +46,25 @@ def test_init_db_backfills_mime_type_column(tmp_path, monkeypatch):
         }
 
     assert "mime_type" in columns
+
+
+def test_init_db_creates_sow_tables(tmp_path, monkeypatch):
+    """The database initialiser should create the SOW tables."""
+
+    db_path = tmp_path / "sow.db"
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
+    database.reset_database_state()
+    reset_settings_cache()
+
+    database.init_db()
+
+    with sqlite3.connect(db_path) as connection:
+        tables = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        }
+
+    assert "sow_runs" in tables
+    assert "sow_steps" in tables
