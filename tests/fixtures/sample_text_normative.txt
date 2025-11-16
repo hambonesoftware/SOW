@@ -1,2 +1,0 @@
-The device shall provide redundant power supplies and must include an operator interlock.
-Software updates should be validated before deployment.

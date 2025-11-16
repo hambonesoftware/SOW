@@ -1,4 +1,4 @@
-"""SimpleSpecs backend entrypoint."""
+"""SOW backend entrypoint."""
 
 from __future__ import annotations
 
@@ -19,7 +19,6 @@ from .middleware import RequestIdMiddleware, SecurityHeadersMiddleware
 from .observability import RequestMetricsMiddleware
 from .paths import EXPORT_DIR, FRONTEND_DIR, UPLOAD_DIR
 from .routers import (
-    compare,
     documents,
     files,
     headers,
@@ -27,10 +26,7 @@ from .routers import (
     observability,
     parse,
     search,
-    specs,
-    specs_buckets,  # NEW: adds wipe + rerun endpoints for spec buckets
 )
-from .spec_extraction.router import router as spec_extraction_router
 
 settings = get_settings()
 logger = logging.getLogger("uvicorn.error")
@@ -71,12 +67,12 @@ def _announce_openrouter_api_key(value: str | None) -> None:
     if value and value.strip():
         masked = _mask_api_key(value)
         message = (
-            "[SimpleSpecs] OpenRouter API key loaded from environment (.env): "
+            "[SOW] OpenRouter API key loaded from environment (.env): "
             f"{masked}"
         )
     else:
         message = (
-            "[SimpleSpecs] OpenRouter API key not found in environment (.env); "
+            "[SOW] OpenRouter API key not found in environment (.env); "
             "OpenRouter-dependent features are disabled."
         )
 
@@ -108,7 +104,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="SimpleSpecs", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="SOW", version="0.1.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_allow_origins,
@@ -128,10 +124,6 @@ ROUTERS: Iterable = (
     health.router,
     parse.router,
     search.router,
-    specs_buckets.router,  # NEW: exposes /api/specs/{id}/buckets + /run-again
-    spec_extraction_router,
-    specs.router,
-    compare.router,
     observability.router,
 )
 

@@ -290,113 +290,12 @@ export async function fetchSectionText(documentId, start, end, sectionKey) {
   return text;
 }
 
-export async function fetchSpecifications(documentId) {
-  return request(`/api/specs/extract/${documentId}`, { method: "POST" });
-}
-
-export async function dispatchSpecAgents(documentId) {
-  return request(`/api/specs/dispatch`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ documentId: String(documentId) }),
-  });
-}
-
-export async function fetchSpecAgentSections(documentId) {
-  return request(`/api/specs?documentId=${encodeURIComponent(documentId)}`);
-}
-
-export async function fetchSpecAgentSection(sectionId) {
-  return request(`/api/specs/${encodeURIComponent(sectionId)}`);
-}
-
-export async function fetchSpecAgentStatus(documentId) {
-  return request(`/api/specs/status?documentId=${encodeURIComponent(documentId)}`);
-}
-
-export async function compareSpecifications(documentId) {
-  return request(`/api/specs/compare/${documentId}`, { method: "POST" });
-}
-
 export async function fetchCachedHeaders(documentId) {
   return request(`/api/headers/${documentId}`);
 }
-// Wipe all stored/spec-cached buckets for a document on the server
-export async function deleteSpecsBuckets(documentId) {
-  apiDebug('deleteSpecsBuckets invoked', { documentId });
-  if (!Number.isFinite(Number(documentId))) {
-    apiDebug('deleteSpecsBuckets invalid document id', { documentId });
-    throw new Error('deleteSpecsBuckets: invalid documentId');
-  }
-  const result = await request(`/api/specs/${documentId}/buckets`, { method: 'DELETE' });
-  apiDebug('deleteSpecsBuckets completed', { documentId, result });
-  return result;
-}
-
-// Re-run extraction fresh (bypass caches) and return new buckets payload
-export async function runSpecsBucketsAgain(documentId) {
-  apiDebug('runSpecsBucketsAgain invoked', { documentId });
-  if (!Number.isFinite(Number(documentId))) {
-    apiDebug('runSpecsBucketsAgain invalid document id', { documentId });
-    throw new Error('runSpecsBucketsAgain: invalid documentId');
-  }
-  // This endpoint should trigger a full re-extract on the server
-  const result = await request(`/api/specs/${documentId}/buckets/run-again`, { method: 'POST' });
-  apiDebug('runSpecsBucketsAgain completed', {
-    documentId,
-    resultType: result == null ? 'null' : typeof result,
-    resultKeys: result && typeof result === 'object' ? Object.keys(result) : null,
-  });
-  return result;
-}
-
-
 export async function deleteDocument(documentId) {
   return request(`/api/files/${documentId}`, { method: "DELETE" });
 }
-
-export async function fetchSpecRecord(documentId) {
-  return request(`/api/specs/${documentId}`);
-}
-
-export async function approveSpecRecord(documentId, body) {
-  return request(`/api/specs/${documentId}/approve`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-}
-
-export async function downloadSpecExport(documentId, format) {
-  const response = await fetch(
-    buildUrl(`/api/specs/${documentId}/export?fmt=${encodeURIComponent(format)}`)
-  );
-  const clone = response.clone();
-  const text = await clone.text();
-
-  if (!response.ok) {
-    throw new Error(`${response.status} ${response.statusText}: ${text.slice(0, 500)}`.trim());
-  }
-
-  const blob = await response.blob();
-
-  const disposition = response.headers.get("content-disposition") ?? "";
-  let filename = `spec-${documentId}.${format === "csv" ? "zip" : "docx"}`;
-  const match = disposition.match(/filename="?([^";]+)"?/i);
-  if (match?.[1]) {
-    filename = decodeURIComponent(match[1]);
-  }
-
-  return {
-    blob,
-    filename,
-    mediaType: response.headers.get("content-type") ?? "application/octet-stream",
-  };
-}
-
-/* --------------------------
- *  NEW: Buckets rerun API
- * -------------------------- */
 
 
 export function toCsv(rows) {

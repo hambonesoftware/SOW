@@ -8,15 +8,8 @@ from pathlib import Path
 from typing import Tuple
 
 from dotenv import load_dotenv
-from pydantic import BaseModel, Field, field_validator
-try:
-    from pydantic_settings import BaseSettings
-except ImportError:  # pragma: no cover - fallback for testing environments
-    class BaseSettings(BaseModel):  # type: ignore[misc]
-        """Fallback BaseSettings implementation when pydantic-settings is unavailable."""
-
-        class Config:
-            env_file = None
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 def _env_flag(name: str, default: bool) -> bool:
@@ -30,10 +23,6 @@ def _env_flag(name: str, default: bool) -> bool:
 
 BASE_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = BASE_DIR.parent
-DEFAULT_TERMS_DIR = BASE_DIR / "resources" / "terms"
-DEFAULT_BASELINES_PATH = BASE_DIR / "resources" / "baselines" / "mandatory_clauses.json"
-
-
 HEADERS_TRACE: bool = os.getenv("HEADERS_TRACE", "0").strip().lower() in {
     "1",
     "true",
@@ -73,12 +62,6 @@ def _parse_csv(raw: str | None) -> tuple[str, ...]:
     items = [part.strip() for part in raw.split(",") if part.strip()]
     return tuple(items)
 
-
-def _default_spec_agents() -> tuple[str, ...]:
-    """Return the configured spec agents or a Mechanical-only default."""
-
-    parsed = _parse_csv(os.getenv("SPECS_ENABLED_AGENTS", "Mechanical"))
-    return parsed or ("Mechanical",)
 
 HEADERS_ALIGN_STRATEGY: str = os.getenv("HEADERS_ALIGN_STRATEGY", "sequential")
 HEADERS_SUPPRESS_TOC: bool = os.getenv("HEADERS_SUPPRESS_TOC", "1") in (
@@ -274,13 +257,12 @@ def _cors_origin_regex_default() -> str | None:
     return raw or None
 
 
-class Settings(BaseModel):
+class Settings(BaseSettings):
     """Application configuration loaded from environment variables."""
 
+    model_config = SettingsConfigDict(env_file=None, extra="ignore")
+
     database_url: str = Field(default_factory=_database_url_default)
-    specs_db_url: str = Field(
-        default_factory=lambda: os.getenv("SPECS_DB_URL", "sqlite:////tmp/simplespecs.db")
-    )
     upload_dir: Path = Field(
         default_factory=lambda: Path(
             os.getenv("UPLOAD_DIR", str(PROJECT_ROOT / "uploads"))
@@ -462,22 +444,6 @@ class Settings(BaseModel):
         default_factory=lambda: os.getenv("OPENROUTER_X_TITLE")
         or os.getenv("X_TITLE")
     )
-    spec_terms_dir: Path = Field(
-        default_factory=lambda: Path(
-            os.getenv("SPEC_TERMS_DIR", str(DEFAULT_TERMS_DIR))
-        )
-    )
-    spec_rule_min_hits: int = Field(
-        default_factory=lambda: int(os.getenv("SPEC_RULE_MIN_HITS", "1"))
-    )
-    spec_multi_label_margin: float = Field(
-        default_factory=lambda: float(os.getenv("SPEC_MULTI_LABEL_MARGIN", "0.0"))
-    )
-    risk_baselines_path: Path = Field(
-        default_factory=lambda: Path(
-            os.getenv("RISK_BASELINES_PATH", str(DEFAULT_BASELINES_PATH))
-        )
-    )
     export_dir: Path = Field(
         default_factory=lambda: Path(
             os.getenv("EXPORT_DIR", str(PROJECT_ROOT / "exports"))
@@ -509,29 +475,6 @@ class Settings(BaseModel):
             os.getenv("EMBEDDINGS_OPENROUTER_TIMEOUT_S", "60")
         )
     )
-    specs_primary_model: str = Field(
-        default_factory=lambda: os.getenv(
-            "SPECS_PRIMARY_MODEL", "anthropic/claude-3.5-sonnet"
-        )
-    )
-    specs_fallback_model: str | None = Field(
-        default_factory=lambda: os.getenv("SPECS_FALLBACK_MODEL", "openai/gpt-4.1-mini")
-    )
-    specs_timeout_s: int = Field(
-        default_factory=lambda: int(os.getenv("SPECS_TIMEOUT_S", "120"))
-    )
-    specs_retry_max: int = Field(
-        default_factory=lambda: int(os.getenv("SPECS_RETRY_MAX", "1"))
-    )
-    specs_backoff_s: float = Field(
-        default_factory=lambda: float(os.getenv("SPECS_BACKOFF_S", "1.5"))
-    )
-    specs_max_headers: int = Field(
-        default_factory=lambda: int(os.getenv("SPECS_MAX_HEADERS", "10"))
-    )
-    specs_enabled_agents: Tuple[str, ...] = Field(
-        default_factory=_default_spec_agents
-    )
 
     @field_validator("upload_dir", mode="after")
     @classmethod
@@ -546,23 +489,19 @@ class Settings(BaseModel):
             return ("application/pdf",)
         return tuple(dict.fromkeys(item.lower() for item in value))
 
-    @field_validator("spec_terms_dir", mode="after")
-    @classmethod
-    def _ensure_terms_dir(cls, value: Path) -> Path:
-        value.mkdir(parents=True, exist_ok=True)
-        return value
-
-    @field_validator("risk_baselines_path", mode="after")
-    @classmethod
-    def _ensure_baseline_file(cls, value: Path) -> Path:
-        value.parent.mkdir(parents=True, exist_ok=True)
-        return value
-
     @field_validator("export_dir", mode="after")
     @classmethod
     def _ensure_export_dir(cls, value: Path) -> Path:
         value.mkdir(parents=True, exist_ok=True)
         return value
+
+    @field_validator("cors_allow_origin_regex", mode="before")
+    @classmethod
+    def _normalise_cors_regex(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        return stripped or None
 
     @field_validator("headers_llm_cache_dir", mode="after")
     @classmethod
@@ -655,14 +594,6 @@ class Settings(BaseModel):
     def _normalise_retention(cls, value: int) -> int:
         return max(0, value)
 
-    @field_validator("specs_fallback_model", mode="after")
-    @classmethod
-    def _normalise_specs_fallback(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        cleaned = value.strip()
-        return cleaned or None
-
 
 @lru_cache()
 def get_settings() -> Settings:
@@ -677,16 +608,3 @@ def reset_settings_cache() -> None:
     get_settings.cache_clear()
 
 
-class SpecSearchSettings(BaseSettings):
-    """Settings specific to the spec-search LLM pipeline."""
-
-    PRIMARY_MODEL: str = "anthropic/claude-3.5-sonnet"
-    FALLBACK_MODEL: str = "openai/gpt-4.1-mini"
-    TIMEOUT_S: int = 240
-    MAX_TOKENS: int = 80_000
-    CHUNK_TARGET_TOKENS: int = 35_000
-    RETRY_MAX: int = 4
-    BACKOFF_S: float = 2.0
-
-
-spec_search_settings = SpecSearchSettings()

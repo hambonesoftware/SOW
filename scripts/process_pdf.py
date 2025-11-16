@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Utility for processing a PDF document through the SimpleSpecs API stack."""
+"""Utility for processing a PDF document through the SOW API stack."""
 
 from __future__ import annotations
 
@@ -79,11 +79,6 @@ def main(argv: list[str] | None = None) -> int:
         default=Path("runtime_artifacts"),
         help="Directory where uploads, exports, and JSON artefacts will be stored",
     )
-    parser.add_argument(
-        "--skip-risk",
-        action="store_true",
-        help="Skip the risk comparison step (faster, produces parse + extraction only)",
-    )
     args = parser.parse_args(argv)
 
     pdf_path = args.pdf.expanduser().resolve()
@@ -109,33 +104,21 @@ def main(argv: list[str] | None = None) -> int:
         _raise_for_status(parse_response)
         parse_payload = parse_response.json()
 
-        extraction_response = api_client.post(f"/api/specs/extract/{document_id}")
-        _raise_for_status(extraction_response)
-        extraction_payload = extraction_response.json()
-
-        risk_payload = None
-        if not args.skip_risk:
-            risk_response = api_client.post(f"/api/specs/compare/{document_id}")
-            _raise_for_status(risk_response)
-            risk_payload = risk_response.json()
+        headers_response = api_client.post(f"/api/headers/{document_id}")
+        _raise_for_status(headers_response)
+        headers_payload = headers_response.json()
 
     artefact_dir = work_dir / "artefacts" / f"document-{document_id}"
     _write_json(artefact_dir / "upload.json", document)
     _write_json(artefact_dir / "parse.json", parse_payload)
-    _write_json(artefact_dir / "specs.json", extraction_payload)
-    if risk_payload is not None:
-        _write_json(artefact_dir / "risk.json", risk_payload)
+    _write_json(artefact_dir / "headers.json", headers_payload)
 
     summary_lines = [
         f"Processed document {document_id} ({pdf_path.name})",
         f"- Stored uploads in: {os.environ['UPLOAD_DIR']}",
         f"- Parse pages: {len(parse_payload.get('pages', []))}",
-        f"- Disciplines extracted: {', '.join(sorted(extraction_payload.get('buckets', {}).keys()))}",
+        f"- Headers detected: {len(headers_payload.get('simpleheaders', []))}",
     ]
-    if risk_payload is not None:
-        summary_lines.append(
-            f"- Risk overall score: {risk_payload.get('overall_score', 'n/a')}"
-        )
 
     print("\n".join(summary_lines))
     print(f"Artefacts written to {artefact_dir}")

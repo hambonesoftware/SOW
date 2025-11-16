@@ -16,8 +16,6 @@ def _settings(tmp_path) -> Settings:
 
     return Settings(
         upload_dir=tmp_path / "uploads",
-        spec_terms_dir=tmp_path / "terms",
-        risk_baselines_path=tmp_path / "baselines.json",
         export_dir=tmp_path / "export",
         headers_llm_cache_dir=tmp_path / "headers-cache",
     )
