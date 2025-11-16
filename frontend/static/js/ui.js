@@ -479,6 +479,7 @@ export function renderHeaderOutline(container, payload, options = {}) {
   if (Array.isArray(payload?.simpleheaders) && payload.simpleheaders.length && Array.isArray(payload.sections) && payload.sections.length) {
     // Quick banner showing number of chunks if trace exists
     container.innerHTML = '';
+    container.append(buildSowHintMessage());
     if (payload?.trace?.events) {
       const chunksBuilt = payload.trace.events.filter((e) => e.type === 'chunk_built').length;
       const banner = document.createElement('p');
@@ -502,7 +503,15 @@ export function renderHeaderOutline(container, payload, options = {}) {
   payload.outline.forEach((node) => list.append(renderTreeNode(node)));
 
   container.innerHTML = '';
+  container.append(buildSowHintMessage());
   container.append(list);
+}
+
+function buildSowHintMessage() {
+  const hint = document.createElement('p');
+  hint.className = 'panel-status panel-status--actionable';
+  hint.textContent = 'Aligned headers are the backbone for the SOW step extraction shown below.';
+  return hint;
 }
 
 

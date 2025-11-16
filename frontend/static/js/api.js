@@ -243,6 +243,15 @@ export async function fetchDocumentStatus(documentId) {
   return request(`/api/documents/${documentId}/status`);
 }
 
+export async function fetchSowRun(documentId) {
+  return request(`/api/sow/${documentId}`);
+}
+
+export async function createSowRun(documentId, { force = false } = {}) {
+  const suffix = force ? "?force=1" : "";
+  return request(`/api/sow/${documentId}${suffix}`, { method: "POST" });
+}
+
 /**
  * Fetch headers for a document.
  * Options:
