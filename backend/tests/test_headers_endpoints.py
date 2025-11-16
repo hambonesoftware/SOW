@@ -209,7 +209,7 @@ def test_post_headers_persists_outline_and_returns_db_payload(monkeypatch, tmp_p
 
     status_response = client.get(f"/api/documents/{document_id}/status")
     assert status_response.status_code == 200
-    assert status_response.json() == {"parsed": True, "headers": True}
+    assert status_response.json() == {"parsed": True, "headers": True, "sow": False}
 
 
 def test_get_headers_404_when_absent(monkeypatch, tmp_path) -> None:
@@ -227,7 +227,7 @@ def test_get_headers_404_when_absent(monkeypatch, tmp_path) -> None:
 
     status_response = client.get(f"/api/documents/{document_id}/status")
     assert status_response.status_code == 200
-    assert status_response.json() == {"parsed": False, "headers": False}
+    assert status_response.json() == {"parsed": False, "headers": False, "sow": False}
 
     response = client.get(f"/api/headers/{document_id}")
     assert response.status_code == 404

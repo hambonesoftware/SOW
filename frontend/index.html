@@ -13,7 +13,7 @@
       <aside class="app-sidebar">
         <header class="sidebar-header">
           <h1 class="brand">SOW</h1>
-          <p class="subtitle">Upload PDFs, parse them, and review aligned headers.</p>
+          <p class="subtitle">Upload PDFs, align headers, and extract scope-of-work steps.</p>
         </header>
         <section class="upload-card" aria-labelledby="upload-title">
           <h2 id="upload-title">Upload documents</h2>
@@ -46,7 +46,9 @@
         <header class="app-main__header">
           <div>
             <h2 id="workspace-title">Document workspace</h2>
-            <p id="workspace-subtitle" class="muted">Select a document to view parsed pages and headers.</p>
+            <p id="workspace-subtitle" class="muted">
+              Select a document to align headers and review the downstream SOW step extraction.
+            </p>
           </div>
           <div class="document-meta" id="document-meta"></div>
         </header>
@@ -83,6 +85,21 @@
             <button type="button" class="ghost-button" data-export="headers">Download JSON</button>
           </div>
           <div class="panel-body" id="headers-content" aria-live="polite"></div>
+        </section>
+
+        <section class="panel" id="panel-sow" aria-labelledby="panel-sow-title">
+          <div class="panel-header">
+            <div class="panel-header__title">
+              <h3 id="panel-sow-title">SOW steps</h3>
+            </div>
+            <div class="panel-actions">
+              <button type="button" class="ghost-button" data-export="sow-csv" disabled>Download CSV</button>
+              <button type="button" class="ghost-button" data-export="sow-json" disabled>Download JSON</button>
+            </div>
+          </div>
+          <div class="panel-body" id="sow-content" aria-live="polite">
+            <p class="panel-status">Select a document to load SOW steps.</p>
+          </div>
         </section>
       </main>
     </div>
