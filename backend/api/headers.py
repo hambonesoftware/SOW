@@ -36,7 +36,6 @@ from ..services.headers_llm_simple import (
 from ..services.headers_orchestrator import (
     extract_headers_and_chunks as orchestrate_headers_and_chunks,
 )
-from ..spec_extraction.jobs import persist_sections
 from ..services.pdf_native import collect_line_metrics, parse_pdf
 from ..services.sections import build_and_store_sections, delete_sections_for_document
 from ..services.simpleheaders_state import SimpleHeadersState
@@ -508,16 +507,6 @@ async def extract_headers_and_chunks(
             sections_payload.append(entry)
     else:
         sections_payload = [_serialise_section(section) for section in persisted_sections]
-
-    try:
-        persist_sections(
-            document_id=str(doc_id),
-            filename=document.filename,
-            sections=sections_payload,
-            headers=simpleheaders_payload,
-        )
-    except Exception:  # pragma: no cover - persistence should not block response
-        pass
 
     outline_payload = header_result.to_json()
     if llm_headers:

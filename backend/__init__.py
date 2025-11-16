@@ -1,4 +1,4 @@
-"""Backend package for SimpleSpecs."""
+"""Backend package for the SOW application."""
 
 from __future__ import annotations
 
@@ -28,9 +28,7 @@ def _patch_testclient() -> None:
     except Exception:  # pragma: no cover - fastapi is an optional dependency
         return
 
-    if getattr(
-        TestClient, "_simplespecs_patch", False
-    ):  # pragma: no cover - idempotent
+    if getattr(TestClient, "_sow_patch", False):  # pragma: no cover - idempotent
         return
 
     original_exit = TestClient.__exit__
@@ -59,7 +57,7 @@ def _patch_testclient() -> None:
 
     TestClient.wait_shutdown = patched_wait_shutdown  # type: ignore[assignment]
     TestClient.__exit__ = patched_exit  # type: ignore[assignment]
-    TestClient._simplespecs_patch = True  # type: ignore[attr-defined]
+    TestClient._sow_patch = True  # type: ignore[attr-defined]
 
 
 _patch_testclient()

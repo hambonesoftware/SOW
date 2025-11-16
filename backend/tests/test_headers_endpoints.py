@@ -93,9 +93,6 @@ def test_post_headers_persists_outline_and_returns_db_payload(monkeypatch, tmp_p
         session.refresh(section)
         return [section]
 
-    def _fake_persist_sections(**_kwargs):  # noqa: ANN001 - no-op
-        return None
-
     call_counter: list[str] = []
 
     async def _fake_orchestrator(
@@ -172,7 +169,6 @@ def test_post_headers_persists_outline_and_returns_db_payload(monkeypatch, tmp_p
     monkeypatch.setattr("backend.api.headers.get_or_create_parse_result", _fake_get_parse_result)
     monkeypatch.setattr("backend.api.headers.extract_headers", lambda *args, **kwargs: header_result)
     monkeypatch.setattr("backend.api.headers.build_and_store_sections", _fake_build_and_store_sections)
-    monkeypatch.setattr("backend.api.headers.persist_sections", _fake_persist_sections)
     monkeypatch.setattr("backend.api.headers.orchestrate_headers_and_chunks", _fake_orchestrator)
     monkeypatch.setattr(
         "backend.routers.headers.extract_headers_and_chunks",

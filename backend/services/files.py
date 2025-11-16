@@ -25,7 +25,6 @@ from ..models import (
     DocumentTable,
     PromptResponse,
 )
-from ..models.spec_record import SpecAuditEntry, SpecRecord
 
 CHUNK_SIZE = 1024 * 1024  # 1MB
 
@@ -142,10 +141,6 @@ def delete_document(
     if document is None:
         return False
 
-    session.exec(
-        delete(SpecAuditEntry).where(SpecAuditEntry.document_id == document_id)
-    )
-    session.exec(delete(SpecRecord).where(SpecRecord.document_id == document_id))
     session.exec(delete(DocumentPage).where(DocumentPage.document_id == document_id))
     session.exec(delete(DocumentTable).where(DocumentTable.document_id == document_id))
     session.exec(delete(DocumentFigure).where(DocumentFigure.document_id == document_id))
@@ -163,12 +158,6 @@ def delete_document(
     document_dir = settings.upload_dir / str(document_id)
     shutil.rmtree(document_dir, ignore_errors=True)
 
-    export_dir = settings.export_dir
-    for pattern in (f"spec-{document_id}-*", f"spec-{document_id}.*"):
-        for path in export_dir.glob(pattern):
-            try:
-                path.unlink()
-            except FileNotFoundError:  # pragma: no cover - race condition guard
-                continue
+    shutil.rmtree(settings.export_dir / str(document_id), ignore_errors=True)
 
     return True
