@@ -58,6 +58,7 @@ def init_db() -> None:
         header_anchor,
         header_outline,
         section,
+        sow,
     )
 
     engine = get_engine()

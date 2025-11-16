@@ -386,6 +386,21 @@ class Settings(BaseSettings):
     headers_llm_backoff_s: float = Field(
         default_factory=lambda: float(os.getenv("HEADERS_LLM_BACKOFF_S", "2"))
     )
+    sow_llm_model: str = Field(
+        default_factory=lambda: os.getenv(
+            "SOW_LLM_MODEL",
+            os.getenv("HEADERS_LLM_MODEL", "anthropic/claude-3.5-sonnet"),
+        )
+    )
+    sow_llm_timeout_s: int = Field(
+        default_factory=lambda: int(os.getenv("SOW_LLM_TIMEOUT_S", "120"))
+    )
+    sow_llm_max_input_tokens: int = Field(
+        default_factory=lambda: int(os.getenv("SOW_LLM_MAX_INPUT_TOKENS", "80000"))
+    )
+    sow_cache_dir: Path = Field(
+        default_factory=lambda: Path(os.getenv("SOW_CACHE_DIR", ".cache/sow"))
+    )
     headers_log_dir: Path = Field(
         default_factory=lambda: Path(
             os.getenv("HEADERS_LOG_DIR", "backend/logs")
@@ -515,6 +530,12 @@ class Settings(BaseSettings):
         value.mkdir(parents=True, exist_ok=True)
         return value
 
+    @field_validator("sow_cache_dir", mode="after")
+    @classmethod
+    def _ensure_sow_cache_dir(cls, value: Path) -> Path:
+        value.mkdir(parents=True, exist_ok=True)
+        return value
+
     @field_validator("header_locate_fuse_weights", mode="after")
     @classmethod
     def _normalise_fuse_weights(
@@ -557,6 +578,16 @@ class Settings(BaseSettings):
     @classmethod
     def _clamp_backoff(cls, value: float) -> float:
         return max(0.0, float(value))
+
+    @field_validator("sow_llm_timeout_s", mode="after")
+    @classmethod
+    def _clamp_sow_timeout(cls, value: int) -> int:
+        return max(1, int(value))
+
+    @field_validator("sow_llm_max_input_tokens", mode="after")
+    @classmethod
+    def _clamp_sow_tokens(cls, value: int) -> int:
+        return max(1024, int(value))
 
     @field_validator("headers_band_lines", mode="after")
     @classmethod

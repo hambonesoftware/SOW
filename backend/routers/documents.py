@@ -19,6 +19,7 @@ from ..models import (
     DocumentPage,
     DocumentSection,
     DocumentTable,
+    SOWRun,
 )
 from ..services.pdf_native import collect_line_metrics
 from ..services.simpleheaders_state import SimpleHeadersState
@@ -321,8 +322,16 @@ def document_status(
         .limit(1)
     ).first() is not None
     headers_ready = bool(outline_cache and has_sections)
+    sow_ready = (
+        session.exec(
+            select(SOWRun.id)
+            .where(SOWRun.document_id == document_id, SOWRun.status == "ok")
+            .limit(1)
+        ).first()
+        is not None
+    )
 
-    return {"parsed": parsed, "headers": headers_ready}
+    return {"parsed": parsed, "headers": headers_ready, "sow": sow_ready}
 
 
 __all__ = ["router"]

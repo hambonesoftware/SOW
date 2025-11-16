@@ -9,6 +9,7 @@ from .headers import router as headers_router
 from .observability import router as observability_router
 from .parse import router as parse_router
 from .search import router as search_router
+from .sow import router as sow_router
 
 api_router = APIRouter()
 api_router.include_router(files_router)
@@ -18,5 +19,6 @@ api_router.include_router(health_router)
 api_router.include_router(parse_router)
 api_router.include_router(observability_router)
 api_router.include_router(search_router)
+api_router.include_router(sow_router)
 
 __all__ = ["api_router"]
