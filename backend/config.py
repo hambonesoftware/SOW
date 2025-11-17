@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from functools import lru_cache
 from pathlib import Path
-from typing import Tuple
+from typing import Any, Tuple
 
 from dotenv import load_dotenv
 from pydantic import Field, field_validator
@@ -271,7 +271,7 @@ class Settings(BaseSettings):
     max_upload_size: int = Field(
         default_factory=lambda: int(os.getenv("MAX_UPLOAD_SIZE", str(25 * 1024 * 1024)))
     )
-    allowed_mimetypes: Tuple[str, ...] = Field(
+    allowed_mimetypes: Tuple[str, ...] | str = Field(
         default_factory=lambda: tuple(
             mime.strip()
             for mime in os.getenv("ALLOWED_MIMETYPES", "application/pdf").split(",")
@@ -498,6 +498,24 @@ class Settings(BaseSettings):
     @classmethod
     def _ensure_upload_dir(cls, value: Path) -> Path:
         value.mkdir(parents=True, exist_ok=True)
+        return value
+
+    @field_validator("allowed_mimetypes", mode="before")
+    @classmethod
+    def _parse_mimetypes(cls, value: Any) -> Tuple[str, ...]:
+        if value in (None, "", ()):  # empty env vars
+            return ("application/pdf",)
+        if isinstance(value, str):
+            return tuple(
+                mime.strip()
+                for mime in value.split(",")
+                if mime.strip()
+            ) or ("application/pdf",)
+        if isinstance(value, (list, tuple, set)):
+            return (
+                tuple(str(mime).strip() for mime in value if str(mime).strip())
+                or ("application/pdf",)
+            )
         return value
 
     @field_validator("allowed_mimetypes", mode="after")
