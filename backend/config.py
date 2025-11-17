@@ -280,6 +280,9 @@ class Settings(BaseSettings):
     )
     cors_allow_origins: Tuple[str, ...] = Field(default_factory=tuple)
     cors_allow_origin_regex: str | None = Field(default_factory=_cors_origin_regex_default)
+    enable_headers_router: bool = Field(
+        default_factory=lambda: _env_flag("ENABLE_HEADERS_ROUTER", False)
+    )
     host: str = Field(default_factory=lambda: os.getenv("HOST", "0.0.0.0"))
     port: int = Field(default_factory=lambda: int(os.getenv("PORT", "8000")))
     log_level: str = Field(default_factory=lambda: os.getenv("LOG_LEVEL", "info"))

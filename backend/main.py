@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Iterable
 import re
 
 from fastapi import FastAPI, Request
@@ -118,18 +117,20 @@ app.add_middleware(RequestIdMiddleware)
 app.add_middleware(RequestMetricsMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
 
-ROUTERS: Iterable = (
+routers_to_mount: list = [
     files.router,
     documents.router,
-    headers.router,
     health.router,
     parse.router,
     search.router,
     observability.router,
     sow.router,
-)
+]
 
-for router in ROUTERS:
+if settings.enable_headers_router:
+    routers_to_mount.insert(2, headers.router)
+
+for router in routers_to_mount:
     app.include_router(router)
 
 

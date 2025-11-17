@@ -5,8 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import textwrap
-import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Iterable, Mapping, Sequence
@@ -14,82 +12,21 @@ from typing import Iterable, Mapping, Sequence
 from sqlalchemy import desc, select
 from sqlmodel import Session
 
+from ..api.sow import ProcessStep, SowRunRequest, SowRunResponse
 from ..config import Settings
-from ..models import Document, DocumentPage, DocumentSection, SOWRun, SOWStep
+from ..models import Document, SOWRun, SOWStep
 from .lines import get_fulltext
 from .llm import LLMResult, LLMService
+from .sow_prompts import build_sow_system_prompt, build_sow_user_prompt
+from .text_chunker import TextChunk, chunk_text_for_llm
 
 LOGGER = logging.getLogger(__name__)
 
 PROMPT_FENCE = "#sow#"
-SECTION_KEYWORDS: tuple[str, ...] = (
-    "scope of work",
-    "scope",
-    "sequence of operations",
-    "system description",
-    "functional description",
-    "functional specification",
-    "operational description",
-    "process description",
+_PROMPT_HASH_SOURCE = build_sow_system_prompt() + build_sow_user_prompt(
+    TextChunk(index=1, total=1, text="{chunk_text}")
 )
-MAX_SECTION_SNIPPETS = 8
-SECTION_CHAR_LIMIT = 6000
-PROMPT_TEMPLATE = textwrap.dedent(
-    """
-    Document ID: {document_id}
-    Document filename: {filename}
-    Document checksum: {checksum}
-
-    Context excerpts:
-    {context}
-
-    Instructions:
-    1. Act as an industrial automation engineer reviewing a Scope of Work / Sequence of Operations document.
-    2. Extract the end-to-end workflow as atomic steps (one actionable idea per step).
-    3. Preserve the original wording in `description` when possible; do not summarize aggressively.
-    4. Populate metadata fields such as `phase`, `actor`, `location`, `inputs`, `outputs`, `dependencies`, and `header_section_key` when the source text implies them.
-    5. Include reasonable `start_page` and `end_page` values (1-based page numbers) whenever the source span is known.
-    6. Return ONLY valid JSON inside {fence} fences using this schema:
-
-       {{"steps": [
-           {{
-             "order_index": 1,
-             "step_id": "1",
-             "phase": "Design",
-             "title": "Review customer RFQ",
-             "description": "...",
-             "actor": "Integrator",
-             "location": "Office",
-             "inputs": "RFQ, standards",
-             "outputs": "Clarifications",
-             "dependencies": null,
-             "header_section_key": "scope_of_work",
-             "start_page": 3,
-             "end_page": 4
-           }}
-       ]}}
-
-    7. Omit any prose outside the JSON fences; no Markdown code blocks.
-    """
-)
-PROMPT_HASH = hashlib.sha256(PROMPT_TEMPLATE.encode("utf-8")).hexdigest()
-
-SYSTEM_PROMPT = textwrap.dedent(
-    """
-    You are an experienced industrial automation engineer. Read the provided Scope of Work
-    context and emit a precise list of execution steps that cover the described system lifecycle.
-    Each step must be atomic, chronologically ordered, and grounded in the supplied text.
-    """
-).strip()
-
-
-@dataclass(slots=True)
-class SOWExtractionResult:
-    """Container describing the outcome of an extraction attempt."""
-
-    run: SOWRun
-    steps: list[SOWStep]
-    reused: bool
+PROMPT_HASH = hashlib.sha256(_PROMPT_HASH_SOURCE.encode("utf-8")).hexdigest()
 
 
 class SOWExtractionError(RuntimeError):
@@ -100,14 +37,23 @@ class DocumentNotReadyError(SOWExtractionError):
     """Raised when the document is missing prerequisites (e.g., parsing)."""
 
 
+@dataclass(slots=True)
+class CachedRun:
+    """Container for a cached SOW run and its associated steps."""
+
+    run: SOWRun
+    steps: list[SOWStep]
+
+
 def run_sow_extraction(
     document_id: int,
     *,
     session: Session,
     settings: Settings,
+    request: SowRunRequest,
     force: bool = False,
     llm: LLMService | None = None,
-) -> SOWExtractionResult:
+) -> SowRunResponse:
     """Execute the SOW extraction workflow for ``document_id``."""
 
     document = session.get(Document, document_id)
@@ -121,65 +67,73 @@ def run_sow_extraction(
     doc_id = int(document.id)
     full_text = get_fulltext(session, doc_id).strip()
     if not full_text:
-        raise DocumentNotReadyError("Document text is unavailable; parse the document first")
+        raise SOWExtractionError("Parsed document text is empty")
 
-    pages = _load_page_lookup(session, doc_id)
-    sections = _load_sections(session, doc_id)
-    snippets = _build_context_snippets(full_text, sections, pages, settings)
-    rendered_context = _render_context(snippets)
-    truncated_context = _truncate_text(rendered_context, _approx_char_limit(settings))
-    source_hash = hashlib.sha256(truncated_context.encode("utf-8")).hexdigest()
+    model_name = request.model or settings.sow_llm_model
+    max_context = min(
+        max(1, request.max_context_tokens), settings.sow_llm_max_input_tokens
+    )
+    chunks = chunk_text_for_llm(full_text, max_context)
+    if not chunks:
+        raise SOWExtractionError("Parsed document text is empty")
+
+    source_hash = hashlib.sha256(full_text.encode("utf-8")).hexdigest()
 
     if not force:
-        reused = _reuse_existing_run(session=session, document_id=doc_id, source_hash=source_hash)
-        if reused is not None:
-            return reused
+        cached = _reuse_existing_run(
+            session=session,
+            document_id=doc_id,
+            source_hash=source_hash,
+            model_name=model_name,
+        )
+        if cached:
+            LOGGER.info("Reusing cached SOW run for document %s", doc_id)
+            return build_sow_response(doc_id, cached.run, cached.steps)
 
     llm_client = llm or LLMService(settings=settings, cache_dir=settings.sow_cache_dir)
-    messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {
-            "role": "user",
-            "content": PROMPT_TEMPLATE.format(
-                document_id=doc_id,
-                filename=document.filename,
-                checksum=document.checksum,
-                context=truncated_context,
-                fence=PROMPT_FENCE,
-            ),
-        },
-    ]
+    if not llm_client.is_enabled:
+        raise SOWExtractionError("OPENROUTER_API_KEY is not configured")
 
-    params = {
-        "max_tokens": settings.sow_llm_max_input_tokens,
-        "temperature": 0.2,
-    }
-    start_time = time.perf_counter()
-    result = llm_client.generate(
-        messages=messages,
-        model=settings.sow_llm_model,
-        fence=PROMPT_FENCE,
-        params=params,
-        metadata={"document_id": doc_id, "feature": "sow"},
-    )
-    latency_ms = int((time.perf_counter() - start_time) * 1000)
+    system_prompt = build_sow_system_prompt()
+    all_chunk_steps: list[list[ProcessStep]] = []
+    total_prompt_tokens = 0
+    total_completion_tokens = 0
 
-    payload_text = (result.fenced or result.content or "").strip()
-    if not payload_text:
-        raise SOWExtractionError("LLM returned an empty response")
-    payload = _load_json(payload_text)
-    steps_payload = parse_sow_steps(payload)
+    for chunk in chunks:
+        result = _invoke_llm(
+            llm_client,
+            model_name=model_name,
+            system_prompt=system_prompt,
+            chunk=chunk,
+            settings=settings,
+            document_id=doc_id,
+            temperature=request.temperature,
+        )
+        payload_text = (result.fenced or result.content or "").strip()
+        if not payload_text:
+            raise SOWExtractionError(
+                f"LLM returned an empty response for chunk {chunk.index}"
+            )
+        payload = _load_json(payload_text)
+        chunk_steps = parse_sow_steps(payload, chunk_index=chunk.index)
+        all_chunk_steps.append(chunk_steps)
 
-    run, steps = _persist_run(
+        usage = result.usage or {}
+        total_prompt_tokens += _coerce_int(usage.get("prompt_tokens")) or 0
+        total_completion_tokens += _coerce_int(usage.get("completion_tokens")) or 0
+
+    normalised_steps = _normalise_steps(all_chunk_steps)
+
+    run, stored_steps = _persist_run(
         session=session,
-        settings=settings,
         document_id=doc_id,
+        model_name=model_name,
         source_hash=source_hash,
-        latency_ms=latency_ms,
-        llm_result=result,
-        steps_payload=steps_payload,
+        prompt_tokens=total_prompt_tokens,
+        completion_tokens=total_completion_tokens,
+        steps=normalised_steps,
     )
-    return SOWExtractionResult(run=run, steps=steps, reused=False)
+    return build_sow_response(doc_id, run, stored_steps)
 
 
 def latest_sow_run(
@@ -199,8 +153,10 @@ def latest_sow_run(
     return run, steps
 
 
-def parse_sow_steps(payload: Mapping[str, object]) -> list[dict[str, object]]:
-    """Coerce ``payload`` into a list of normalised step dictionaries."""
+def parse_sow_steps(
+    payload: Mapping[str, object], *, chunk_index: int = 0
+) -> list[ProcessStep]:
+    """Coerce ``payload`` into a list of normalised :class:`ProcessStep`."""
 
     if not isinstance(payload, Mapping):
         raise SOWExtractionError("SOW response must be a JSON object")
@@ -209,95 +165,160 @@ def parse_sow_steps(payload: Mapping[str, object]) -> list[dict[str, object]]:
     if not isinstance(raw_steps, Sequence) or not raw_steps:
         raise SOWExtractionError("SOW response is missing a non-empty 'steps' array")
 
-    normalised: list[dict[str, object]] = []
+    processed: list[ProcessStep] = []
     used_indices: set[int] = set()
-    fallback_index = 1
-    for entry in raw_steps:
+    fallback_order = 1
+    for index, entry in enumerate(raw_steps, start=1):
         if not isinstance(entry, Mapping):
             continue
-        provided_index = _coerce_int(entry.get("order_index"))
-        if provided_index is not None and provided_index > 0:
-            order_index = provided_index
+        order_value = entry.get("order") or entry.get("order_index")
+        order = _coerce_int(order_value)
+        if order is None or order <= 0:
+            order = _next_available_index(fallback_order, used_indices)
+            fallback_order = order + 1
         else:
-            order_index = _next_available_index(fallback_index, used_indices)
-            fallback_index = order_index + 1
-        used_indices.add(order_index)
-        title = str(entry.get("title", "")).strip()
-        description = str(entry.get("description", "")).strip()
-        if not description:
+            order = _next_available_index(order, used_indices)
+        used_indices.add(order)
+
+        title = _coerce_str(entry.get("title"))
+        description = _coerce_str(entry.get("description"))
+        if description and not title:
+            title = description.splitlines()[0]
+        if title and not description:
             description = title
-        if not title:
-            title = description or f"Step {order_index}"
         if not description:
             continue
+        if not title:
+            title = f"Step {order}"
 
-        step_payload: dict[str, object] = {
-            "order_index": order_index,
-            "step_id": _coerce_str(entry.get("step_id")),
-            "phase": _coerce_str(entry.get("phase")),
-            "title": title,
-            "description": description,
-            "actor": _coerce_str(entry.get("actor")),
-            "location": _coerce_str(entry.get("location")),
-            "inputs": _coerce_str(entry.get("inputs")),
-            "outputs": _coerce_str(entry.get("outputs")),
-            "dependencies": _coerce_str(entry.get("dependencies")),
-            "header_section_key": _coerce_str(
-                entry.get("header_section_key") or entry.get("section_key")
-            ),
-            "start_page": _coerce_int(entry.get("start_page")),
-            "end_page": _coerce_int(entry.get("end_page")),
-        }
-        normalised.append(step_payload)
+        step_id = (
+            _coerce_str(entry.get("id"))
+            or _coerce_str(entry.get("step_id"))
+            or _fallback_step_id(chunk_index, index)
+        )
+        label = _coerce_str(entry.get("label"))
+        phase = _coerce_str(entry.get("phase"))
+        source_page_start = _coerce_int(
+            entry.get("source_page_start") or entry.get("start_page")
+        )
+        source_page_end = _coerce_int(
+            entry.get("source_page_end") or entry.get("end_page")
+        )
+        source_section_title = _coerce_str(
+            entry.get("source_section_title") or entry.get("header_section_key")
+        )
 
-    if not normalised:
+        processed.append(
+            ProcessStep(
+                id=step_id,
+                order=int(order),
+                phase=phase,
+                label=label,
+                title=title,
+                description=description,
+                source_page_start=source_page_start,
+                source_page_end=source_page_end,
+                source_section_title=source_section_title,
+            )
+        )
+
+    if not processed:
         raise SOWExtractionError("LLM response did not contain any valid steps")
 
-    normalised.sort(key=lambda item: (int(item["order_index"]), item.get("step_id") or ""))
+    processed.sort(key=lambda step: (step.order, step.id))
+    normalised: list[ProcessStep] = []
+    for idx, step in enumerate(processed, start=1):
+        normalised.append(
+            ProcessStep(
+                id=step.id,
+                order=idx,
+                phase=step.phase,
+                label=step.label,
+                title=step.title,
+                description=step.description,
+                source_page_start=step.source_page_start,
+                source_page_end=step.source_page_end,
+                source_section_title=step.source_section_title,
+            )
+        )
+
     return normalised
 
 
-def _reuse_existing_run(
-    *, session: Session, document_id: int, source_hash: str
-) -> SOWExtractionResult | None:
-    statement = (
-        select(SOWRun)
-        .where(
-            SOWRun.document_id == document_id,
-            SOWRun.source_hash == source_hash,
-            SOWRun.status == "ok",
-        )
-        .order_by(desc(SOWRun.created_at))
+def _invoke_llm(
+    llm_client: LLMService,
+    *,
+    model_name: str,
+    system_prompt: str,
+    chunk: TextChunk,
+    settings: Settings,
+    document_id: int,
+    temperature: float,
+) -> LLMResult:
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": build_sow_user_prompt(chunk)},
+    ]
+    params = {
+        "max_tokens": settings.sow_llm_max_input_tokens,
+        "temperature": temperature,
+    }
+    return llm_client.generate(
+        messages=messages,
+        model=model_name,
+        fence=PROMPT_FENCE,
+        params=params,
+        metadata={
+            "feature": "sow",
+            "document_id": document_id,
+            "chunk": chunk.index,
+        },
     )
-    run = session.exec(statement).scalars().first()
-    if run is None:
-        return None
-    steps = _load_steps_for_run(session, run.id or 0)
-    return SOWExtractionResult(run=run, steps=steps, reused=True)
+
+
+def _normalise_steps(chunks_steps: Sequence[Sequence[ProcessStep]]) -> list[ProcessStep]:
+    """Flatten and renumber orders across all chunks."""
+
+    normalised: list[ProcessStep] = []
+    order = 0
+    for chunk_steps in chunks_steps:
+        for step in chunk_steps:
+            order += 1
+            normalised.append(
+                ProcessStep(
+                    id=step.id or f"S{order:04d}",
+                    order=order,
+                    phase=step.phase,
+                    label=step.label,
+                    title=step.title,
+                    description=step.description,
+                    source_page_start=step.source_page_start,
+                    source_page_end=step.source_page_end,
+                    source_section_title=step.source_section_title,
+                )
+            )
+    return normalised
 
 
 def _persist_run(
     *,
     session: Session,
-    settings: Settings,
     document_id: int,
+    model_name: str,
     source_hash: str,
-    latency_ms: int,
-    llm_result: LLMResult,
-    steps_payload: Sequence[Mapping[str, object]],
+    prompt_tokens: int,
+    completion_tokens: int,
+    steps: Sequence[ProcessStep],
 ) -> tuple[SOWRun, list[SOWStep]]:
-    """Insert the :class:`SOWRun` and its associated :class:`SOWStep` rows."""
-
     timestamp = datetime.now(UTC)
-    usage = llm_result.usage or {}
     run = SOWRun(
         document_id=document_id,
-        model=settings.sow_llm_model,
+        model=model_name,
         source_hash=source_hash,
         prompt_hash=PROMPT_HASH,
-        tokens_prompt=_coerce_int(usage.get("prompt_tokens")),
-        tokens_completion=_coerce_int(usage.get("completion_tokens")),
-        latency_ms=latency_ms,
+        tokens_prompt=prompt_tokens or None,
+        tokens_completion=completion_tokens or None,
+        latency_ms=None,
         status="ok",
         error_message=None,
         created_at=timestamp,
@@ -308,14 +329,56 @@ def _persist_run(
     session.refresh(run)
 
     stored_steps: list[SOWStep] = []
-    for payload in steps_payload:
-        step = SOWStep(run_id=run.id, **payload)
-        session.add(step)
-        stored_steps.append(step)
+    for step in steps:
+        record = SOWStep(
+            run_id=run.id,
+            order_index=step.order,
+            step_id=step.id,
+            label=step.label,
+            phase=step.phase,
+            title=step.title,
+            description=step.description,
+            actor=None,
+            location=None,
+            inputs=None,
+            outputs=None,
+            dependencies=None,
+            header_section_key=None,
+            source_section_title=step.source_section_title,
+            start_page=step.source_page_start,
+            end_page=step.source_page_end,
+        )
+        session.add(record)
+        stored_steps.append(record)
     session.commit()
     for step in stored_steps:
         session.refresh(step)
     return run, stored_steps
+
+
+def _reuse_existing_run(
+    *,
+    session: Session,
+    document_id: int,
+    source_hash: str,
+    model_name: str,
+) -> CachedRun | None:
+    statement = (
+        select(SOWRun)
+        .where(
+            SOWRun.document_id == document_id,
+            SOWRun.source_hash == source_hash,
+            SOWRun.model == model_name,
+            SOWRun.prompt_hash == PROMPT_HASH,
+            SOWRun.status == "ok",
+        )
+        .order_by(desc(SOWRun.created_at))
+    )
+    run = session.exec(statement).scalars().first()
+    if run is None:
+        return None
+    steps = _load_steps_for_run(session, run.id or 0)
+    return CachedRun(run=run, steps=steps)
 
 
 def _load_steps_for_run(session: Session, run_id: int) -> list[SOWStep]:
@@ -327,129 +390,42 @@ def _load_steps_for_run(session: Session, run_id: int) -> list[SOWStep]:
     return list(session.exec(statement).scalars().all())
 
 
-def _load_page_lookup(session: Session, document_id: int) -> dict[int, DocumentPage]:
-    statement = (
-        select(DocumentPage)
-        .where(DocumentPage.document_id == document_id)
-        .order_by(DocumentPage.page_index)
+def build_sow_response(
+    document_id: int, run: SOWRun, steps: Sequence[SOWStep]
+) -> SowRunResponse:
+    process_steps = _steps_from_models(steps)
+    return SowRunResponse(
+        document_id=document_id,
+        run_id=str(run.id or ""),
+        model=run.model,
+        steps=process_steps,
     )
-    pages = session.exec(statement).scalars().all()
-    lookup: dict[int, DocumentPage] = {}
-    for page in pages:
-        lookup[int(page.page_index)] = page
-    return lookup
 
 
-def _load_sections(session: Session, document_id: int) -> list[DocumentSection]:
-    statement = (
-        select(DocumentSection)
-        .where(DocumentSection.document_id == document_id)
-        .order_by(DocumentSection.start_page, DocumentSection.start_global_idx)
-    )
-    return list(session.exec(statement).scalars().all())
-
-
-def _build_context_snippets(
-    full_text: str,
-    sections: Sequence[DocumentSection],
-    pages: Mapping[int, DocumentPage],
-    settings: Settings,
-) -> list[dict[str, str]]:
-    snippets: list[dict[str, str]] = []
-    for section in sections:
-        if len(snippets) >= MAX_SECTION_SNIPPETS:
-            break
-        if not _looks_like_sow_section(section):
-            continue
-        section_text = _section_text(section, pages)
-        if not section_text:
-            continue
-        snippets.append(
-            {
-                "label": _describe_section(section),
-                "text": _truncate_text(section_text, SECTION_CHAR_LIMIT),
-            }
+def _steps_from_models(records: Iterable[SOWStep]) -> list[ProcessStep]:
+    steps: list[ProcessStep] = []
+    for record in records:
+        steps.append(
+            ProcessStep(
+                id=record.step_id or f"S{record.order_index:04d}",
+                order=int(record.order_index),
+                phase=record.phase,
+                label=record.label,
+                title=record.title,
+                description=record.description,
+                source_page_start=record.start_page,
+                source_page_end=record.end_page,
+                source_section_title=record.source_section_title
+                or record.header_section_key,
+            )
         )
-
-    if snippets:
-        return snippets
-
-    return [
-        {
-            "label": "Full Document Text",
-            "text": _truncate_text(full_text, _approx_char_limit(settings)),
-        }
-    ]
-
-
-def _describe_section(section: DocumentSection) -> str:
-    start_page = section.start_page if section.start_page is not None else "?"
-    end_page = section.end_page if section.end_page is not None else start_page
-    return (
-        f"Section: {section.title} (key={section.section_key}, pages {start_page}-{end_page})"
-    )
-
-
-def _section_text(section: DocumentSection, pages: Mapping[int, DocumentPage]) -> str:
-    bounds = _section_page_bounds(section)
-    if bounds is None:
-        return ""
-    start_idx, end_idx = bounds
-    parts: list[str] = []
-    for page_index in range(start_idx, end_idx + 1):
-        page = pages.get(page_index)
-        if page is None:
-            continue
-        text = str(page.text_raw or "").strip()
-        if text:
-            parts.append(text)
-    return "\n".join(parts).strip()
-
-
-def _section_page_bounds(section: DocumentSection) -> tuple[int, int] | None:
-    start = _coerce_int(section.start_page)
-    end = _coerce_int(section.end_page)
-    if start is None and end is None:
-        return None
-    if start is None:
-        start = end
-    if end is None:
-        end = start
-    start_idx = start - 1 if start and start > 0 else int(start or 0)
-    if start_idx < 0:
-        start_idx = 0
-    end_idx = end - 1 if end and end > 0 else int(end or start_idx)
-    if end_idx < start_idx:
-        end_idx = start_idx
-    return start_idx, end_idx
-
-
-def _looks_like_sow_section(section: DocumentSection) -> bool:
-    haystack = f"{section.title} {section.number or ''}".lower()
-    return any(keyword in haystack for keyword in SECTION_KEYWORDS)
-
-
-def _render_context(snippets: Sequence[Mapping[str, str]]) -> str:
-    chunks = [f"{snippet['label']}\n{snippet['text']}" for snippet in snippets]
-    return "\n\n".join(chunk.strip() for chunk in chunks if chunk.strip())
-
-
-def _truncate_text(text: str, limit: int) -> str:
-    if len(text) <= limit:
-        return text
-    truncated = text[:limit].rsplit("\n", 1)[0].strip()
-    return truncated + "\n…"
-
-
-def _approx_char_limit(settings: Settings) -> int:
-    return max(4000, int(settings.sow_llm_max_input_tokens) * 4)
+    return steps
 
 
 def _load_json(raw: str) -> Mapping[str, object]:
     try:
         return json.loads(raw)
     except json.JSONDecodeError as exc:  # pragma: no cover - defensive
-        # Attempt to locate the first top-level JSON object in the payload.
         start = raw.find("{")
         end = raw.rfind("}")
         if start == -1 or end <= start:
@@ -484,12 +460,16 @@ def _next_available_index(start: int, used: set[int]) -> int:
     return candidate
 
 
+def _fallback_step_id(chunk_index: int, local_index: int) -> str:
+    chunk_part = f"C{chunk_index:02d}" if chunk_index else "C00"
+    return f"{chunk_part}-S{local_index:02d}"
+
+
 __all__ = [
     "DocumentNotReadyError",
     "SOWExtractionError",
-    "SOWExtractionResult",
+    "build_sow_response",
     "latest_sow_run",
     "parse_sow_steps",
     "run_sow_extraction",
 ]
-
