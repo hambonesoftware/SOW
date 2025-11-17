@@ -247,9 +247,14 @@ export async function fetchSowRun(documentId) {
   return request(`/api/sow/${documentId}`);
 }
 
-export async function createSowRun(documentId, { force = false } = {}) {
+export async function createSowRun(documentId, { force = false, body = null } = {}) {
   const suffix = force ? "?force=1" : "";
-  return request(`/api/sow/${documentId}${suffix}`, { method: "POST" });
+  const init = { method: "POST" };
+  if (body && typeof body === "object" && Object.keys(body).length) {
+    init.body = JSON.stringify(body);
+    init.headers = { "Content-Type": "application/json" };
+  }
+  return request(`/api/sow/${documentId}${suffix}`, init);
 }
 
 /**

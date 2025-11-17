@@ -9,7 +9,7 @@ from sqlmodel import Session
 from backend import database
 from backend.config import reset_settings_cache
 from backend.main import app
-from backend.models import Document, DocumentPage, DocumentSection
+from backend.models import Document, DocumentPage
 from backend.services import sow_extraction
 from backend.services.llm import LLMResult
 
@@ -46,19 +46,6 @@ def test_sow_router_creates_and_reuses_run(tmp_path, monkeypatch) -> None:
                 layout=[],
             )
         )
-        session.add(
-            DocumentSection(
-                document_id=doc_id,
-                section_key="scope::0",
-                title="Scope of Work",
-                number="1",
-                level=1,
-                start_global_idx=0,
-                end_global_idx=10,
-                start_page=1,
-                end_page=1,
-            )
-        )
         session.commit()
 
     fake_payload = {
@@ -80,6 +67,10 @@ def test_sow_router_creates_and_reuses_run(tmp_path, monkeypatch) -> None:
         def __init__(self, *args, **kwargs):  # noqa: D401 - test stub
             pass
 
+        @property
+        def is_enabled(self):  # noqa: D401 - test stub
+            return True
+
         def generate(self, **kwargs):  # noqa: D401 - test stub
             FakeLLM.calls += 1
             return LLMResult(
@@ -96,14 +87,13 @@ def test_sow_router_creates_and_reuses_run(tmp_path, monkeypatch) -> None:
         assert response.status_code == 200, response.text
         payload = response.json()
         assert payload["steps"], payload
-        assert payload["meta"]["model"]
-        assert payload["reused"] is False
+        assert payload["model"]
         assert FakeLLM.calls == 1
 
         reuse = client.post(f"/api/sow/{doc_id}")
         assert reuse.status_code == 200
-        assert reuse.json()["reused"] is True
         assert FakeLLM.calls == 1, "Existing runs should be reused when force=false"
+        assert reuse.json()["steps"], reuse.text
 
         fetched = client.get(f"/api/sow/{doc_id}")
         assert fetched.status_code == 200

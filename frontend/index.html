@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="api-base" content="same-origin" />
-    <title>SOW – Scope-of-Work Headers</title>
+    <title>SOW – Process Steps</title>
     <link rel="stylesheet" href="/static/styles.css" />
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
   </head>
@@ -13,7 +13,7 @@
       <aside class="app-sidebar">
         <header class="sidebar-header">
           <h1 class="brand">SOW</h1>
-          <p class="subtitle">Upload PDFs, align headers, and extract scope-of-work steps.</p>
+          <p class="subtitle">Upload PDFs, parse them, and extract process steps directly.</p>
         </header>
         <section class="upload-card" aria-labelledby="upload-title">
           <h2 id="upload-title">Upload documents</h2>
@@ -46,9 +46,7 @@
         <header class="app-main__header">
           <div>
             <h2 id="workspace-title">Document workspace</h2>
-            <p id="workspace-subtitle" class="muted">
-              Select a document to align headers and review the downstream SOW step extraction.
-            </p>
+            <p id="workspace-subtitle" class="muted">Select a document to review and process.</p>
           </div>
           <div class="document-meta" id="document-meta"></div>
         </header>
@@ -61,38 +59,13 @@
           <div class="panel-body" id="parse-content" aria-live="polite"></div>
         </section>
 
-        <section class="panel" id="panel-header-raw" aria-labelledby="panel-header-raw-title">
-          <div class="panel-header">
-            <h3 id="panel-header-raw-title">LLM raw response</h3>
-          </div>
-          <div class="panel-body" id="headers-raw-content" aria-live="polite"></div>
-        </section>
-
-        <section class="panel" id="panel-headers" aria-labelledby="panel-headers-title">
-          <div class="panel-header">
-            <div class="panel-header__title">
-              <h3 id="panel-headers-title">Header outline</h3>
-              <span id="header-mode-tag" class="panel-tag" hidden></span>
-              <button
-                id="refresh-headers"
-                type="button"
-                class="ghost-button panel-inline-button"
-                aria-label="Run the header alignment pipeline"
-              >
-                Detect headers
-              </button>
-            </div>
-            <button type="button" class="ghost-button" data-export="headers">Download JSON</button>
-          </div>
-          <div class="panel-body" id="headers-content" aria-live="polite"></div>
-        </section>
-
         <section class="panel" id="panel-sow" aria-labelledby="panel-sow-title">
           <div class="panel-header">
             <div class="panel-header__title">
               <h3 id="panel-sow-title">SOW steps</h3>
             </div>
             <div class="panel-actions">
+              <button id="run-sow" type="button" class="primary-button">Process steps</button>
               <button type="button" class="ghost-button" data-export="sow-csv" disabled>Download CSV</button>
               <button type="button" class="ghost-button" data-export="sow-json" disabled>Download JSON</button>
             </div>

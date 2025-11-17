@@ -68,6 +68,9 @@ class SOWStep(SQLModel, table=True):
     phase: str | None = Field(
         default=None, description="Lifecycle phase tag supplied by the LLM (Design/FAT/etc)."
     )
+    label: str | None = Field(
+        default=None, description="Optional human-friendly label such as 'Step 1.1'."
+    )
     title: str = Field(nullable=False, description="Short name describing the step.")
     description: str = Field(
         sa_column=Column(Text, nullable=False),
@@ -97,6 +100,10 @@ class SOWStep(SQLModel, table=True):
     header_section_key: str | None = Field(
         default=None,
         description="Section key associated with the paragraph that sourced this step.",
+    )
+    source_section_title: str | None = Field(
+        default=None,
+        description="Free-text label describing the originating section title.",
     )
     start_page: int | None = Field(
         default=None,
