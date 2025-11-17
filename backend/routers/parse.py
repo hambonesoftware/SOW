@@ -9,7 +9,10 @@ from sqlmodel import Session
 from ..config import Settings, get_settings
 from ..database import get_session
 from ..models import Document
-from ..services.artifact_store import get_or_create_parse_result
+from ..services.artifact_store import (
+    get_cached_parse_payload,
+    get_or_create_parse_result,
+)
 from ..services.pdf_native import ParseResult, parse_pdf
 
 router = APIRouter(prefix="/api", tags=["parse"])
@@ -77,6 +80,9 @@ async def parse_document(
     doc_id = document.id
     document_path = settings.upload_dir / str(doc_id) / document.filename
     if not document_path.exists():
+        cached_payload = get_cached_parse_payload(session=session, document=document)
+        if cached_payload is not None:
+            return ParseResponse(document_id=doc_id, **cached_payload)
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Document contents missing"
         )
