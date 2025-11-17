@@ -119,6 +119,52 @@ def test_parse_document_reuses_cached_payload(tmp_path: Path, monkeypatch: pytes
 
 
 @pytest.mark.usefixtures("tmp_path")
+def test_parse_document_serves_cached_payload_when_file_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _reload_app_environment(tmp_path, monkeypatch)
+
+    from backend.main import app
+
+    parse_calls = [0]
+    monkeypatch.setattr(
+        "backend.routers.parse.parse_pdf",
+        _stub_parse_factory(parse_calls),
+    )
+
+    settings = get_settings()
+
+    try:
+        with TestClient(app) as client:
+            engine = get_engine()
+            with Session(engine) as session:
+                document = _create_document(session)
+                document_id = document.id
+
+            assert document_id is not None
+            document_dir = settings.upload_dir / str(document_id)
+            document_dir.mkdir(parents=True, exist_ok=True)
+            pdf_path = document_dir / "doc.pdf"
+            pdf_path.write_bytes(b"PDF")
+
+            first_response = client.post(f"/api/parse/{document_id}")
+            assert first_response.status_code == 200
+            assert parse_calls[0] == 1
+
+            pdf_path.unlink()
+
+            cached_response = client.post(f"/api/parse/{document_id}")
+            assert cached_response.status_code == 200
+            assert parse_calls[0] == 1
+
+            payload = cached_response.json()
+            assert payload["pages"][0]["blocks"][0]["text"] == "Heading"
+    finally:
+        reset_settings_cache()
+        reset_database_state()
+
+
+@pytest.mark.usefixtures("tmp_path")
 def test_parse_document_rehydrates_from_stored_pages(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _reload_app_environment(tmp_path, monkeypatch)
 
