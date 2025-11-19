@@ -56,6 +56,11 @@ async def get_files(
     "/files/{document_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     response_class=Response,
+    responses={
+        status.HTTP_204_NO_CONTENT: {
+            "description": "Document removed successfully.",
+        }
+    },
 )
 async def remove_file(
     document_id: int,
@@ -75,4 +80,4 @@ async def remove_file(
     # Return a bare ``Response`` object so FastAPI does not attempt to infer a
     # response model (which would violate the ``204`` contract) and so no body
     # is sent to the client.
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    return Response(status_code=status.HTTP_204_NO_CONTENT, media_type=None)
