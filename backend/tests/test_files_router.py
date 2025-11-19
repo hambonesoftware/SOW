@@ -27,3 +27,5 @@ def test_delete_file_returns_no_content(monkeypatch) -> None:
 
     assert response.status_code == 204
     assert response.content == b""
+    # 204 responses must not emit a content type header according to RFC 9110.
+    assert response.headers.get("content-type") is None
