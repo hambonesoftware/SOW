@@ -109,12 +109,7 @@ def run_sow_extraction(
             document_id=doc_id,
             temperature=request.temperature,
         )
-        payload_text = (result.fenced or result.content or "").strip()
-        if not payload_text:
-            raise SOWExtractionError(
-                f"LLM returned an empty response for chunk {chunk.index}"
-            )
-        payload = _load_json(payload_text)
+        payload = _extract_sow_payload(result.content or "", chunk_index=chunk.index)
         chunk_steps = parse_sow_steps(payload, chunk_index=chunk.index)
         all_chunk_steps.append(chunk_steps)
 
@@ -266,7 +261,6 @@ def _invoke_llm(
     return llm_client.generate(
         messages=messages,
         model=model_name,
-        fence=PROMPT_FENCE,
         params=params,
         metadata={
             "feature": "sow",
@@ -274,6 +268,63 @@ def _invoke_llm(
             "chunk": chunk.index,
         },
     )
+
+
+def _extract_sow_payload(raw: str, *, chunk_index: int) -> Mapping[str, object]:
+    """Return the first valid JSON object with a top-level ``steps`` array."""
+
+    text = raw.strip()
+    if not text:
+        raise SOWExtractionError(
+            f"LLM returned an empty response for chunk {chunk_index}"
+        )
+
+    for candidate in _iter_json_candidates(text):
+        try:
+            payload = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, Mapping) and isinstance(payload.get("steps"), list):
+            return payload
+
+    raise SOWExtractionError(
+        f"LLM response for chunk {chunk_index} was not valid JSON"
+    )
+
+
+def _iter_json_candidates(raw: str) -> list[str]:
+    """Yield distinct snippets that could contain the JSON payload."""
+
+    text = raw.strip()
+    if not text:
+        return []
+
+    candidates: list[str] = []
+    seen: set[str] = set()
+
+    def _push(value: str) -> None:
+        cleaned = value.strip()
+        if cleaned and cleaned not in seen:
+            seen.add(cleaned)
+            candidates.append(cleaned)
+
+    _push(text)
+
+    fence = PROMPT_FENCE
+    if fence in text:
+        first = text.find(fence)
+        second = text.find(fence, first + len(fence))
+        if second != -1:
+            inner = text[first + len(fence) : second]
+            _push(inner)
+
+    first_brace = text.find("{")
+    last_brace = text.rfind("}")
+    if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
+        snippet = text[first_brace : last_brace + 1]
+        _push(snippet)
+
+    return candidates
 
 
 def _normalise_steps(chunks_steps: Sequence[Sequence[ProcessStep]]) -> list[ProcessStep]:
@@ -420,21 +471,6 @@ def _steps_from_models(records: Iterable[SOWStep]) -> list[ProcessStep]:
             )
         )
     return steps
-
-
-def _load_json(raw: str) -> Mapping[str, object]:
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError as exc:  # pragma: no cover - defensive
-        start = raw.find("{")
-        end = raw.rfind("}")
-        if start == -1 or end <= start:
-            raise SOWExtractionError("LLM response was not valid JSON") from exc
-        snippet = raw[start : end + 1]
-        try:
-            return json.loads(snippet)
-        except json.JSONDecodeError as exc_inner:
-            raise SOWExtractionError("LLM response was not valid JSON") from exc_inner
 
 
 def _coerce_int(value: object | None) -> int | None:
