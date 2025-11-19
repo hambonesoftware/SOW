@@ -52,7 +52,11 @@ async def get_files(
     return list_documents(session=session)
 
 
-@router.delete("/files/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/files/{document_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+)
 async def remove_file(
     document_id: int,
     *,
