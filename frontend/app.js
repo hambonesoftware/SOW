@@ -1,21 +1,21 @@
-const textarea = document.getElementById('spec-text');
-const runButton = document.getElementById('run-search');
-const statusEl = document.getElementById('status');
-const resultsEl = document.getElementById('results');
-const telemetryBody = document.getElementById('telemetry-body');
-const warningsEl = document.getElementById('warnings');
+import { createSpecSearchViewModel } from './view-model.js';
+
+const elements = {
+  textarea: document.getElementById('spec-text'),
+  runButton: document.getElementById('run-search'),
+  status: document.getElementById('status'),
+  results: document.getElementById('results'),
+  telemetryBody: document.getElementById('telemetry-body'),
+  warnings: document.getElementById('warnings'),
+  documentId: document.getElementById('document-id'),
+  bucketInputs: document.querySelectorAll('.bucket-list input[type="checkbox"]'),
+};
 
 const levelColors = {
   MUST: '#dc2626',
   SHOULD: '#d97706',
   MAY: '#059669',
 };
-
-function currentBuckets() {
-  return Array.from(document.querySelectorAll('.bucket-list input[type="checkbox"]:checked')).map(
-    (input) => input.value,
-  );
-}
 
 function normalizeBuckets(data) {
   if (!data) return {};
@@ -25,8 +25,9 @@ function normalizeBuckets(data) {
 }
 
 function renderBuckets(data) {
+  if (!elements.results) return;
   const buckets = normalizeBuckets(data);
-  resultsEl.innerHTML = '';
+  elements.results.innerHTML = '';
   Object.entries(buckets).forEach(([bucket, payload]) => {
     const card = document.createElement('article');
     card.className = 'bucket-card';
@@ -80,13 +81,14 @@ function renderBuckets(data) {
       card.appendChild(list);
     }
 
-    resultsEl.appendChild(card);
+    elements.results.appendChild(card);
   });
 }
 
 function renderTelemetry(meta) {
-  telemetryBody.innerHTML = '';
-  warningsEl.textContent = '';
+  if (!elements.telemetryBody || !elements.warnings) return;
+  elements.telemetryBody.innerHTML = '';
+  elements.warnings.textContent = '';
   if (!meta) return;
   meta.attempts.forEach((attempt) => {
     const row = document.createElement('tr');
@@ -98,57 +100,79 @@ function renderTelemetry(meta) {
       <td>${attempt.input_tokens_est}</td>
       <td>${attempt.response_bytes}</td>
     `;
-    telemetryBody.appendChild(row);
+    elements.telemetryBody.appendChild(row);
   });
   if (meta.warnings && meta.warnings.length) {
-    warningsEl.textContent = meta.warnings.join(' \u2022 ');
+    elements.warnings.textContent = meta.warnings.join(' \u2022 ');
   }
 }
 
-async function runSearch() {
-  const text = textarea.value.trim();
-  if (!text) {
-    statusEl.textContent = 'Paste specification text to run the search.';
-    return;
+function collectSelectedBuckets() {
+  return Array.from(elements.bucketInputs)
+    .filter((input) => input.checked)
+    .map((input) => input.value);
+}
+
+function createBinding(viewModel, selector, render) {
+  return viewModel.subscribe((state, prevState) => {
+    const next = selector(state);
+    const prev = prevState ? selector(prevState) : undefined;
+    if (prevState && Object.is(next, prev)) return;
+    render(next, state);
+  });
+}
+
+const viewModel = createSpecSearchViewModel();
+
+createBinding(viewModel, (state) => state.status, (status) => {
+  if (elements.status) {
+    elements.status.textContent = status || '';
   }
-  const buckets = currentBuckets();
-  if (!buckets.length) {
-    statusEl.textContent = 'Select at least one bucket.';
-    return;
+});
+
+createBinding(viewModel, (state) => state.running, (running) => {
+  if (elements.runButton) {
+    elements.runButton.disabled = Boolean(running);
   }
+});
 
-  const payload = {
-    document_id: document.getElementById('document-id').value || null,
-    text,
-    buckets,
-  };
+createBinding(viewModel, (state) => state.results, (results) => {
+  renderBuckets(results);
+});
 
-  statusEl.textContent = 'Running…';
-  runButton.disabled = true;
+createBinding(viewModel, (state) => state.telemetry, (telemetry) => {
+  renderTelemetry(telemetry);
+});
 
-  try {
-    const response = await fetch('/api/spec-search', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(payload),
+function bindInputs() {
+  if (elements.textarea) {
+    viewModel.setText(elements.textarea.value);
+    elements.textarea.addEventListener('input', (event) => {
+      viewModel.setText(event.target.value);
     });
-    const result = await response.json();
-    renderTelemetry(result.meta);
-    if (result.ok) {
-      renderBuckets(result.data);
-      statusEl.textContent = 'Extraction complete.';
-    } else {
-      resultsEl.innerHTML = '';
-      statusEl.textContent = result.error || 'Extraction failed.';
-    }
-  } catch (error) {
-    console.error(error);
-    statusEl.textContent = 'Network error when calling /api/spec-search.';
-  } finally {
-    runButton.disabled = false;
+  }
+
+  if (elements.documentId) {
+    viewModel.setDocumentId(elements.documentId.value || null);
+    elements.documentId.addEventListener('input', (event) => {
+      viewModel.setDocumentId(event.target.value || null);
+    });
+  }
+
+  if (elements.bucketInputs) {
+    const updateBuckets = () => viewModel.setBuckets(collectSelectedBuckets());
+    updateBuckets();
+    elements.bucketInputs.forEach((input) => input.addEventListener('change', updateBuckets));
+  }
+
+  if (elements.runButton) {
+    elements.runButton.addEventListener('click', () => {
+      const { running } = viewModel.getState();
+      if (!running) {
+        viewModel.runSearch();
+      }
+    });
   }
 }
 
-runButton.addEventListener('click', runSearch);
+bindInputs();
