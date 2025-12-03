@@ -118,7 +118,44 @@ class LLMService:
         if not messages:
             raise ValueError("LLMService.generate requires at least one message")
 
-        provider = self.get_provider()
+        configured = self.get_provider()
+        providers = [
+            value.strip().lower() for value in configured.split(",") if value.strip()
+        ]
+        if not providers:
+            raise LLMProviderError("LLMService.generate requires at least one provider")
+
+        last_error: Exception | None = None
+        for index, provider in enumerate(providers):
+            try:
+                return self._generate_with_provider(
+                    provider=provider,
+                    messages=messages,
+                    model=model,
+                    fence=fence,
+                    params=params,
+                    metadata=metadata,
+                )
+            except Exception as exc:
+                last_error = exc
+                if index + 1 < len(providers):
+                    self._circuit_open_until = None
+                continue
+
+        if last_error is None:
+            last_error = LLMProviderError("Unknown LLM failure")
+        raise last_error
+
+    def _generate_with_provider(
+        self,
+        *,
+        provider: str,
+        messages: Sequence[Mapping[str, str]],
+        model: str | None,
+        fence: str | None,
+        params: Mapping[str, Any] | None,
+        metadata: Mapping[str, Any] | None,
+    ) -> LLMResult:
         if self._circuit_open_until and self._time() < self._circuit_open_until:
             raise LLMCircuitOpenError(
                 f"Provider circuit open for another {self._circuit_open_until - self._time():.1f}s"
