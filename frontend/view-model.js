@@ -88,17 +88,42 @@ export function createSpecSearchViewModel() {
         body: JSON.stringify(payload),
       });
 
-      const result = await response.json();
-      const status = result.ok ? 'Extraction complete.' : result.error || 'Extraction failed.';
+      const contentType = response.headers.get('content-type') || '';
+      const isJson = contentType.includes('application/json');
+      const body = isJson ? await response.json() : await response.text();
+      const telemetry = isJson && body && typeof body === 'object' ? body.meta ?? null : null;
+
+      if (!response.ok) {
+        const errorText = isJson ? body?.error || body?.message : body;
+        const status = response.status >= 500
+          ? `Server error (${response.status}). Please try again.`
+          : errorText
+            ? `Request failed (${response.status}): ${errorText}`
+            : `Request failed (${response.status}).`;
+
+        setState({ results: null, telemetry, status });
+        return body;
+      }
+
+      if (isJson) {
+        const status = body?.ok !== false ? 'Extraction complete.' : body?.error || 'Extraction failed.';
+        setState({
+          results: body?.ok !== false ? body?.data ?? null : null,
+          telemetry,
+          status,
+        });
+        return body;
+      }
+
       setState({
-        results: result.ok ? result.data ?? null : null,
-        telemetry: result.meta ?? null,
-        status,
+        results: null,
+        telemetry,
+        status: 'Unexpected response format from /api/spec-search.',
       });
-      return result;
+      return null;
     } catch (error) {
       console.error(error);
-      setState({ status: 'Network error when calling /api/spec-search.' });
+      setState({ results: null, telemetry: null, status: 'Network error when calling /api/spec-search.' });
       return null;
     } finally {
       setState({ running: false });
