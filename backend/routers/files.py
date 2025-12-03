@@ -54,8 +54,6 @@ async def get_files(
 
 @router.delete(
     "/files/{document_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
-    response_class=Response,
     responses={
         status.HTTP_204_NO_CONTENT: {
             "description": "Document removed successfully.",
