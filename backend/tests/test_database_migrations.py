@@ -26,6 +26,53 @@ def _create_legacy_document_table(path: Path) -> None:
         )
 
 
+def _create_legacy_sow_tables(path: Path) -> None:
+    """Create legacy SOW tables missing the ``label`` column."""
+
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE sow_runs (
+                id INTEGER PRIMARY KEY,
+                document_id INTEGER NOT NULL,
+                model VARCHAR NOT NULL,
+                source_hash VARCHAR NOT NULL,
+                prompt_hash VARCHAR NOT NULL,
+                tokens_prompt INTEGER,
+                tokens_completion INTEGER,
+                latency_ms INTEGER,
+                status VARCHAR NOT NULL DEFAULT 'pending',
+                error_message VARCHAR,
+                created_at DATETIME NOT NULL,
+                updated_at DATETIME NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE sow_steps (
+                id INTEGER PRIMARY KEY,
+                run_id INTEGER NOT NULL,
+                order_index INTEGER NOT NULL,
+                step_id VARCHAR,
+                phase VARCHAR,
+                title VARCHAR NOT NULL,
+                description TEXT NOT NULL,
+                actor VARCHAR,
+                location VARCHAR,
+                inputs TEXT,
+                outputs TEXT,
+                dependencies TEXT,
+                header_section_key VARCHAR,
+                source_section_title VARCHAR,
+                start_page INTEGER,
+                end_page INTEGER,
+                created_at DATETIME NOT NULL
+            )
+            """
+        )
+
+
 def test_init_db_backfills_mime_type_column(tmp_path, monkeypatch):
     """``init_db`` should add the ``mime_type`` column when it is missing."""
 
@@ -68,3 +115,24 @@ def test_init_db_creates_sow_tables(tmp_path, monkeypatch):
 
     assert "sow_runs" in tables
     assert "sow_steps" in tables
+
+
+def test_init_db_backfills_sow_step_label(tmp_path, monkeypatch):
+    """``init_db`` should add the ``label`` column to ``sow_steps`` when missing."""
+
+    db_path = tmp_path / "legacy_sow.db"
+    _create_legacy_sow_tables(db_path)
+
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
+    database.reset_database_state()
+    reset_settings_cache()
+
+    database.init_db()
+
+    with sqlite3.connect(db_path) as connection:
+        columns = {
+            row[1]
+            for row in connection.execute("PRAGMA table_info(sow_steps)")
+        }
+
+    assert "label" in columns
