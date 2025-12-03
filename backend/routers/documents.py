@@ -24,6 +24,7 @@ from ..models import (
 from ..services.pdf_native import collect_line_metrics
 from ..services.simpleheaders_state import SimpleHeadersState
 from ..services.outline_cache import latest_outline_for_document
+from ..view_models.headers import StoredHeadersView
 
 router = APIRouter(prefix="/api", tags=["documents"])
 
@@ -67,17 +68,6 @@ class TablePayload(BaseModel):
     bbox: tuple[float, float, float, float]
     flavor: str | None = None
     accuracy: float | None = None
-
-
-class StoredHeadersResponse(BaseModel):
-    """Cached header tree retrieved from the artifact store."""
-
-    headers: list[dict[str, Any]] = Field(default_factory=list)
-    sections: list[dict[str, Any]] = Field(default_factory=list)
-    mode: str | None = None
-    messages: list[str] = Field(default_factory=list)
-    doc_hash: str | None = None
-    created_at: str | None = None
 
 
 @router.get("/documents/{document_id}", response_model=Document)
@@ -253,14 +243,14 @@ def _ensure_section_cache(
 
 
 @router.get(
-    "/documents/{document_id}/headers", response_model=StoredHeadersResponse
+    "/documents/{document_id}/headers", response_model=StoredHeadersView
 )
 async def get_cached_headers(
     document_id: int,
     *,
     session: Session = Depends(get_session),
     settings: Settings = Depends(get_settings),
-) -> StoredHeadersResponse:
+) -> StoredHeadersView:
     """Return the most recent cached header tree for a document."""
 
     document = session.get(Document, document_id)
@@ -291,13 +281,15 @@ async def get_cached_headers(
         settings=settings,
         payload=payload,
     )
-    return StoredHeadersResponse(
-        headers=list(payload.get("headers", [])),
-        sections=list(payload.get("sections", [])),
-        mode=payload.get("mode"),
-        messages=list(payload.get("messages", [])),
-        doc_hash=payload.get("doc_hash"),
-        created_at=artifact.created_at.isoformat() if artifact.created_at else None,
+    return StoredHeadersView.from_payload(
+        {
+            "headers": list(payload.get("headers", [])),
+            "sections": list(payload.get("sections", [])),
+            "mode": payload.get("mode"),
+            "messages": list(payload.get("messages", [])),
+            "doc_hash": payload.get("doc_hash"),
+            "created_at": artifact.created_at.isoformat() if artifact.created_at else None,
+        }
     )
 
 
