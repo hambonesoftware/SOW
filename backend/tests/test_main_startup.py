@@ -15,6 +15,19 @@ def _reload(module_name: str):
     return importlib.reload(module)
 
 
+def test_headers_router_enabled_by_default(monkeypatch):
+    """Headers endpoints should be mounted unless explicitly disabled."""
+
+    monkeypatch.delenv("ENABLE_HEADERS_ROUTER", raising=False)
+
+    _reload("backend.config")
+    main_module = _reload("backend.main")
+
+    routes = {route.path for route in main_module.app.routes}
+
+    assert "/api/headers/{document_id}" in routes
+
+
 def test_startup_logs_openrouter_api_key(monkeypatch, tmp_path, caplog):
     """The backend should announce the OpenRouter API key status at startup."""
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any, Mapping
+
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse, PlainTextResponse
 from sqlmodel import Session
@@ -63,7 +65,8 @@ async def compute_headers(
     if isinstance(result, JSONResponse):
         return result
 
-    return HeaderRunResponse.from_payload(result)
+    payload = dict(result)
+    return JSONResponse(content=_normalise_header_payload(payload, document_id))
 
 
 @router.get("/headers/{document_id}", response_model=HeaderRunResponse)
@@ -85,7 +88,7 @@ def get_headers(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Headers not found",
         )
-    return HeaderRunResponse.from_payload(payload)
+    return JSONResponse(content=_normalise_header_payload(payload, document_id))
 
 
 @router.get("/headers/{document_id}/outline", response_model=HeaderOutlineResponse)
@@ -107,6 +110,12 @@ def get_headers_outline(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Outline not found",
         )
+    outline = payload.get("outline")
+    if isinstance(outline, dict):
+        payload["outline"] = [outline]
+    elif outline is None:
+        payload["outline"] = []
+
     return HeaderOutlineResponse.from_payload(payload)
 
 
@@ -135,6 +144,42 @@ def section_text(
         session=session,
     )
 HeadersLLMClient = HeadersLLMClientImpl
+
+
+def _normalise_header_payload(payload: Mapping[str, Any], document_id: int) -> dict[str, Any]:
+    """Coerce headers payloads into a consistent response shape."""
+
+    normalised = dict(payload)
+    normalised.setdefault("documentId", document_id)
+    normalised.setdefault("runId", None)
+
+    outline = normalised.get("outline")
+    if isinstance(outline, dict):
+        normalised["outline"] = [outline]
+    elif outline is None:
+        normalised["outline"] = []
+
+    normalised.setdefault("sections", [])
+    normalised.setdefault("simpleheaders", [])
+    normalised.setdefault("llm_headers", normalised.get("llm_headers", []))
+    normalised.setdefault("matches", normalised.get("matches", []))
+
+    response_model = HeaderRunResponse.from_payload(normalised)
+    data = response_model.model_dump(by_alias=True)
+
+    for section in data.get("sections", []):
+        key = section.get("sectionKey") or section.get("section_key")
+        if key is not None:
+            section["sectionKey"] = key
+            section["section_key"] = key
+
+    for header in data.get("simpleheaders", []):
+        key = header.get("sectionKey") or header.get("section_key")
+        if key is not None:
+            header["sectionKey"] = key
+            header["section_key"] = key
+
+    return data
 
 __all__ = [
     "router",
