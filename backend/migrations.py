@@ -159,6 +159,22 @@ def _ensure_document_page_is_toc(engine: Engine) -> None:
         )
 
 
+def _ensure_sow_step_label(engine: Engine) -> None:
+    """Add the ``label`` column to ``sow_steps`` when missing."""
+
+    with engine.begin() as connection:
+        inspector = inspect(connection)
+        try:
+            columns = inspector.get_columns("sow_steps")
+        except NoSuchTableError:
+            return
+
+        if any(column["name"] == "label" for column in columns):
+            return
+
+        connection.execute(text("ALTER TABLE sow_steps ADD COLUMN label VARCHAR"))
+
+
 _MIGRATIONS: tuple[MigrationFunc, ...] = (
     _ensure_document_mime_type,
     _ensure_document_byte_size,
@@ -168,6 +184,7 @@ _MIGRATIONS: tuple[MigrationFunc, ...] = (
     _ensure_document_parser_version,
     _ensure_document_last_parsed_at,
     _ensure_document_page_is_toc,
+    _ensure_sow_step_label,
 )
 
 
