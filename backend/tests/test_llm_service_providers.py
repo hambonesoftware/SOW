@@ -40,6 +40,33 @@ def test_generate_returns_first_successful_provider(tmp_path: Path) -> None:
     assert calls == ["primary:openrouter/auto"]
 
 
+def test_generate_uses_next_provider_after_failure(tmp_path: Path) -> None:
+    calls: list[str] = []
+
+    def failing(request: LLMTransportRequest) -> LLMTransportResponse:  # noqa: ANN001
+        calls.append(f"fail:{request.model}")
+        raise LLMProviderError("boom")
+
+    def fallback(request: LLMTransportRequest) -> LLMTransportResponse:  # noqa: ANN001
+        calls.append(f"fallback:{request.model}")
+        return LLMTransportResponse(content="fallback-success", usage=None, raw=None)
+
+    settings = Settings(
+        llm_provider="primary,secondary",
+        openrouter_api_key="sk-test",
+        upload_dir=tmp_path,
+    )
+    llm = LLMService(
+        settings=settings,
+        transport_overrides={"primary": failing, "secondary": fallback},
+    )
+
+    result = llm.generate(messages=[{"role": "user", "content": "hi"}])
+
+    assert result.content == "fallback-success"
+    assert calls == ["fail:openrouter/auto", "fallback:openrouter/auto"]
+
+
 def test_generate_raises_after_all_providers_fail(tmp_path: Path) -> None:
     calls: list[str] = []
 
