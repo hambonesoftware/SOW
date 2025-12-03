@@ -38,27 +38,39 @@ class SimpleHeaderPayload(BaseModel):
     page: int | None = None
     line_idx: int | None = None
     global_idx: int | None = None
-    section_key: str | None = None
+    section_key: str | None = Field(
+        default=None,
+        alias="sectionKey",
+        validation_alias="sectionKey",
+        serialization_alias="sectionKey",
+    )
     source_idx: int | None = None
     strategy: str | None = None
     score: float | None = None
 
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
 
 
 class HeaderSectionPayload(BaseModel):
     """Section bounds derived from aligned headers."""
 
-    section_key: str | None = None
+    section_key: str | None = Field(
+        default=None,
+        alias="sectionKey",
+        validation_alias="sectionKey",
+        serialization_alias="sectionKey",
+    )
     header_text: str | None = None
+    title: str | None = Field(default=None, alias="title")
     header_number: str | None = None
+    number: str | None = Field(default=None, alias="number")
     level: int = 1
     start_global_idx: int
     end_global_idx: int
     start_page: int | None = None
     end_page: int | None = None
 
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
 
 
 class HeaderOrchestrationView(BaseModel):
@@ -116,6 +128,8 @@ class HeaderRunResponse(BaseModel):
     meta: HeaderRunMeta | None = None
     sections: list[HeaderSectionPayload] = Field(default_factory=list)
     simpleheaders: list[SimpleHeaderPayload] = Field(default_factory=list)
+    llm_headers: list[dict[str, Any]] = Field(default_factory=list, alias="llm_headers")
+    matches: list[dict[str, Any]] = Field(default_factory=list)
     doc_hash: str | None = Field(default=None, alias="docHash")
     mode: str | None = None
     messages: list[str] = Field(default_factory=list)

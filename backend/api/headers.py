@@ -497,6 +497,8 @@ async def extract_headers_and_chunks(
                 "section_key": section_key_by_gid.get(start_idx),
                 "header_text": section.get("header_text"),
                 "header_number": section.get("header_number"),
+                "title": section.get("header_text"),
+                "number": section.get("header_number"),
                 "level": _coerce_int(section.get("level"), default=1),
                 "start_global_idx": start_idx,
                 "end_global_idx": _coerce_optional_int(section.get("end_global_idx"))
